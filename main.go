@@ -1,14 +1,17 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"sync"
 )
 
 var (
-	UserNodeDict = make(map[*userdb.User]*tree.TreeNode)
+	db           = NewUserDatabase()
+	UserNodeDict = make(map[*User]*TreeNode)
 	Stats        = map[string]int{
 		"users":              0,
 		"positive_responses": 0,
@@ -49,7 +52,7 @@ func CreateCouponMessage(user *User) map[string]interface{} {
 				"name": "reveal_coupon",
 				"text": "Reveal Coupon",
 				"type": "button",
-				"url":  "http://example.com/coupon/reveal",
+				"url":  "https://example.com/coupon/reveal",
 			},
 		},
 	}
@@ -78,7 +81,10 @@ func CreateMediaMessage(user *User) map[string]interface{} {
 func RunClientServer() {
 	http.HandleFunc("/webhook/callback", handleWebhook)
 	http.HandleFunc("/get_stats", getStats)
-	http.ListenAndServe(":6000", nil)
+	err := http.ListenAndServe(":6000", nil)
+	if err != nil {
+		return
+	}
 }
 
 func handleWebhook(w http.ResponseWriter, r *http.Request) {
@@ -91,25 +97,103 @@ func handleWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Extract user and handle the received answer
-	user := userdb.GetUser(data["user_id"].(int))
+	user := db.GetUser(data["user_id"].(int))
 	handleAnswerReceived(user, data)
 
 	// Respond to the webhook
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "success"})
+	err = json.NewEncoder(w).Encode(map[string]string{"status": "success"})
+	if err != nil {
+		return
+	}
 }
 
-func handleAnswerReceived(user *userdb.User, data map[string]interface{}) {
-	// Implement the logic to handle the answer received
+func handleAnswerReceived(user *User, data map[string]interface{}) {
+	log.Printf("Received answer from user %s , %v\n", user.Name, data)
+
+	eventType, ok := data["event_type"].(string)
+	if !ok {
+		log.Println("Error: event_type missing or not a string.")
+		return
+	}
+
+	switch eventType {
+	case "message_read":
+		Stats["messages_read"]++
+		log.Printf("User %s %s read the message at %v\n", user.Name, user.Surname, data["interaction_timestamp"])
+
+	case "link_click":
+		log.Printf("User %s %s clicked the link!!!!!\n", user.Name, user.Surname)
+		Stats["coupon_reveals"]++
+
+	default:
+		node, exists := UserNodeDict[user]
+		if !exists {
+			log.Println("Error: User not found in UserNodeDict.")
+			return
+		}
+
+		buttonName, ok := data["button_name"].(string)
+		if !ok {
+			log.Println("Error: button_name missing or not a string.")
+			return
+		}
+
+		var nextNode *TreeNode
+		for _, child := range node.Children {
+			if child.Data.ButtonNameOfOrigin == buttonName {
+				nextNode = child
+				break
+			}
+		}
+
+		if nextNode == nil {
+			log.Println("Error: No matching child node found.")
+			return
+		}
+
+		if buttonName == "no_thanks" {
+			Stats["negative_responses"]++
+		} else {
+			Stats["positive_responses"]++
+		}
+
+		sendMessageMockServer(nextNode.Data.JSON(user))
+	}
 }
 
-func sendMessagetoMockServer(data map[string]interface{}) {
-	// Implement the logic to send message to mock server
-}
+func sendMessageMockServer(data map[string]interface{}) {
+	serverURL := "http://localhost:5000/api/message"
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		log.Printf("Failed to marshal data: %v\n", err)
+		return
+	}
 
+	response, err := http.Post(serverURL, "application/json", bytes.NewBuffer(jsonData))
+	if err != nil {
+		log.Printf("Failed to send request: %v\n", err)
+		return
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode == http.StatusOK {
+		var respData map[string]interface{}
+		if err := json.NewDecoder(response.Body).Decode(&respData); err != nil {
+			log.Println("Error decoding response:", err)
+			return
+		}
+		log.Printf("Server responded with: %v\n", respData)
+	} else {
+		log.Printf("Failed to send message. Server responded with status code: %d\n", response.StatusCode)
+	}
+}
 func getStats(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(parameters.Stats)
+	err := json.NewEncoder(w).Encode(Stats)
+	if err != nil {
+		return
+	}
 }
 
 type User struct {
@@ -157,17 +241,16 @@ func (db *UserDatabase) GetAllUsers() []*User {
 
 func (db *UserDatabase) ListUsers() {
 	for _, user := range db.users {
-		// Print user details
 		fmt.Println(user.Name, user.Surname, user.UserID, user.Age)
 	}
 }
 
 type Data struct {
-	JSON               func(*userdb.User) map[string]interface{}
+	JSON               func(*User) map[string]interface{}
 	ButtonNameOfOrigin string
 }
 
-func NewData(jsonFunc func(*userdb.User) map[string]interface{}, buttonNameOfOrigin string) *Data {
+func NewData(jsonFunc func(*User) map[string]interface{}, buttonNameOfOrigin string) *Data {
 	return &Data{
 		JSON:               jsonFunc,
 		ButtonNameOfOrigin: buttonNameOfOrigin,
@@ -190,11 +273,7 @@ func (node *TreeNode) AddChild(childNode *TreeNode) {
 	node.Children = append(node.Children, childNode)
 }
 
-func (node *TreeNode) Display(level int) {
-	// Implement the display logic here
-}
-
-func createUsers(db *userdb.UserDatabase) {
+func createUsers(db *UserDatabase) {
 	db.CreateUser("spiros", "diochnos", 1, "26")
 	db.CreateUser("vaso", "kollia", 2, "27")
 	db.CreateUser("angelos", "todri", 3, "28")
@@ -206,32 +285,31 @@ func main() {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		servercomm.RunClientServer()
+		RunClientServer()
 	}()
 
-	db := userdb.NewUserDatabase()
 	createUsers(db)
 
 	// Creating data instances
-	dataRoot := tree.NewData(parameters.CreateWelcomingMessage, "")
-	dataChild1 := tree.NewData(parameters.CreateCouponMessage, "show_coupon")
-	dataChild2 := tree.NewData(parameters.CreateMediaMessage, "no_thanks")
+	dataRoot := NewData(CreateWelcomingMessage, "")
+	dataChild1 := NewData(CreateCouponMessage, "show_coupon")
+	dataChild2 := NewData(CreateMediaMessage, "no_thanks")
 
 	// Creating the tree nodes with data instances
-	root := tree.NewTreeNode(dataRoot)
-	child1 := tree.NewTreeNode(dataChild1)
-	child2 := tree.NewTreeNode(dataChild2)
+	root := NewTreeNode(dataRoot)
+	child1 := NewTreeNode(dataChild1)
+	child2 := NewTreeNode(dataChild2)
 
 	// Building the tree structure
 	root.AddChild(child1)
 	root.AddChild(child2)
 
-	parameters.Stats["users"] = len(db.GetAllUsers())
+	Stats["users"] = len(db.GetAllUsers())
 
 	for _, user := range db.GetAllUsers() {
-		parameters.UserNodeDict[user] = root
+		UserNodeDict[user] = root
 		// send message to mock server logic here
-		// sendMessagetoMockServer(root.Data.JSON(user))
+		// sendMessageMockServer(root.Data.JSON(user))
 	}
 
 	wg.Wait()
