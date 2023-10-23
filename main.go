@@ -164,11 +164,6 @@ func RunClientServer() {
 }
 
 func getStats(w http.ResponseWriter, r *http.Request) {
-	//w.Header().Set("Content-Type", "application/json")
-	//err := json.NewEncoder(w).Encode(Stats)
-	//if err != nil {
-	//	return
-	//}
 
 	values := []chart.Value{}
 
