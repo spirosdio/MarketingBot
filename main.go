@@ -18,16 +18,61 @@ var (
 	}
 )
 
-func CreateWelcomingMessage(user *userdb.User) map[string]interface{} {
-	// Convert Python dictionary to Go map and return
+func CreateWelcomingMessage(user *User) map[string]interface{} {
+	welcomingAttachment := map[string]interface{}{
+		"actions": []map[string]interface{}{
+			{
+				"name": "show_coupon",
+				"text": "Yes! Show me coupon",
+				"type": "button",
+			},
+			{
+				"name": "no_thanks",
+				"text": "No, thanks",
+				"type": "button",
+			},
+		},
+	}
+
+	return map[string]interface{}{
+		"user_id":      user.UserID,
+		"callback_url": "http://localhost:6000/webhook/callback",
+		"text":         fmt.Sprintf("Welcome to the demo promotional flow, %s! Are you interested in our coupon promotion?", user.Name),
+		"attachments":  welcomingAttachment,
+	}
 }
 
-func CreateCouponMessage(user *userdb.User) map[string]interface{} {
-	// Convert Python dictionary to Go map and return
+func CreateCouponMessage(user *User) map[string]interface{} {
+	couponAttachment := map[string]interface{}{
+		"actions": []map[string]interface{}{
+			{
+				"name": "reveal_coupon",
+				"text": "Reveal Coupon",
+				"type": "button",
+				"url":  "http://example.com/coupon/reveal",
+			},
+		},
+	}
+
+	return map[string]interface{}{
+		"user_id":      user.UserID,
+		"callback_url": "http://localhost:6000/webhook/callback",
+		"text":         "Here is our unique promotional coupon! 10% off. Limit 1 per customer.",
+		"attachments":  couponAttachment,
+	}
 }
 
-func CreateMediaMessage(user *userdb.User) map[string]interface{} {
-	// Convert Python dictionary to Go map and return
+func CreateMediaMessage(user *User) map[string]interface{} {
+	mediaAttachment := map[string]interface{}{
+		"image_url": "jpg", // Note: You might want to replace this with the actual JPG URL.
+	}
+
+	return map[string]interface{}{
+		"user_id":      user.UserID,
+		"callback_url": "http://localhost:6000/webhook/callback",
+		"text":         "No worries! Have a nice day!",
+		"attachments":  mediaAttachment,
+	}
 }
 
 func RunClientServer() {
