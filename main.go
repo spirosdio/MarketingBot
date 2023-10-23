@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/wcharczuk/go-chart/v2"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -18,7 +19,7 @@ var (
 		"positive_responses": 0,
 		"negative_responses": 0,
 		"coupon_reveals":     0,
-		"messages_read":      0,
+		//"messages_read":      0,
 	}
 )
 
@@ -163,11 +164,38 @@ func RunClientServer() {
 }
 
 func getStats(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	err := json.NewEncoder(w).Encode(Stats)
+	//w.Header().Set("Content-Type", "application/json")
+	//err := json.NewEncoder(w).Encode(Stats)
+	//if err != nil {
+	//	return
+	//}
+
+	values := []chart.Value{}
+
+	for key, val := range Stats {
+		values = append(values, chart.Value{
+			Label: key,
+			Value: float64(val),
+		})
+	}
+
+	barChart := chart.BarChart{
+		Title:    "Statistics",
+		Width:    812,
+		Height:   512,
+		BarWidth: 60,
+		Bars:     values,
+	}
+
+	var buffer bytes.Buffer
+	err := barChart.Render(chart.PNG, &buffer)
 	if err != nil {
+		http.Error(w, "Failed to generate chart", http.StatusInternalServerError)
 		return
 	}
+
+	w.Header().Set("Content-Type", "image/png")
+	w.Write(buffer.Bytes())
 }
 
 func sendMessageMockServer(data map[string]interface{}) {
@@ -233,7 +261,7 @@ func handleAnswerReceived(user *User, data map[string]interface{}) {
 
 	switch eventType {
 	case "message_read":
-		Stats["messages_read"]++
+		//Stats["messages_read"]++
 		log.Printf("User %s %s read the message at %v\n", user.Name, user.Surname, data["interaction_timestamp"])
 
 	case "link_click":
@@ -288,6 +316,11 @@ func main() {
 	db.CreateUser("spiros", "diochnos", 1, "26")
 	db.CreateUser("vaso", "kollia", 2, "27")
 	db.CreateUser("angelos", "todri", 3, "28")
+	db.CreateUser("giorgos", "kollas", 4, "29")
+	db.CreateUser("spiros", "diochnos", 5, "26")
+	db.CreateUser("vaso", "kollia", 6, "27")
+	db.CreateUser("angelos", "todri", 7, "28")
+	db.CreateUser("giorgos", "kollas", 8, "29")
 
 	// Creating data instances
 	dataRoot := NewData(CreateWelcomingMessage, "")
