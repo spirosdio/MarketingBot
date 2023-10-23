@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"sync"
@@ -20,6 +21,80 @@ var (
 		"messages_read":      0,
 	}
 )
+
+type User struct {
+	Name    string
+	Surname string
+	UserID  int
+	Age     string
+}
+type UserDatabase struct {
+	users map[int]*User
+}
+type Data struct {
+	JSON               func(*User) map[string]interface{}
+	ButtonNameOfOrigin string
+}
+type TreeNode struct {
+	Data     *Data
+	Children []*TreeNode
+}
+
+func NewUserDatabase() *UserDatabase {
+	return &UserDatabase{
+		users: make(map[int]*User),
+	}
+}
+
+func (db *UserDatabase) CreateUser(name string, surname string, userID int, age string) *User {
+	if _, exists := db.users[userID]; !exists {
+		newUser := &User{
+			Name:    name,
+			Surname: surname,
+			UserID:  userID,
+			Age:     age,
+		}
+		db.users[userID] = newUser
+		return newUser
+	}
+	return nil
+}
+
+func (db *UserDatabase) GetUser(userID int) *User {
+	return db.users[userID]
+}
+
+func (db *UserDatabase) GetAllUsers() []*User {
+	var allUsers []*User
+	for _, user := range db.users {
+		allUsers = append(allUsers, user)
+	}
+	return allUsers
+}
+
+func (db *UserDatabase) ListUsers() {
+	for _, user := range db.users {
+		fmt.Println(user.Name, user.Surname, user.UserID, user.Age)
+	}
+}
+
+func NewData(jsonFunc func(*User) map[string]interface{}, buttonNameOfOrigin string) *Data {
+	return &Data{
+		JSON:               jsonFunc,
+		ButtonNameOfOrigin: buttonNameOfOrigin,
+	}
+}
+
+func NewTreeNode(data *Data) *TreeNode {
+	return &TreeNode{
+		Data:     data,
+		Children: make([]*TreeNode, 0),
+	}
+}
+
+func (node *TreeNode) AddChild(childNode *TreeNode) {
+	node.Children = append(node.Children, childNode)
+}
 
 func CreateWelcomingMessage(user *User) map[string]interface{} {
 	welcomingAttachment := map[string]interface{}{
@@ -87,17 +162,56 @@ func RunClientServer() {
 	}
 }
 
-func handleWebhook(w http.ResponseWriter, r *http.Request) {
-	var data map[string]interface{}
-	decoder := json.NewDecoder(r.Body)
-	err := decoder.Decode(&data)
+func getStats(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	err := json.NewEncoder(w).Encode(Stats)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+}
+
+func sendMessageMockServer(data map[string]interface{}) {
+	serverURL := "http://localhost:5000/api/message"
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		log.Printf("Failed to marshal data: %v\n", err)
 		return
 	}
 
+	response, err := http.Post(serverURL, "application/json", bytes.NewBuffer(jsonData))
+	if err != nil {
+		log.Printf("Failed to send request: %v\n", err)
+		return
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode == http.StatusOK {
+		var respData map[string]interface{}
+		if err := json.NewDecoder(response.Body).Decode(&respData); err != nil {
+			log.Println("Error decoding response:", err)
+			return
+		}
+		log.Printf("Server responded with: %v\n", respData)
+	} else {
+		log.Printf("Failed to send message. Server responded with status code: %d\n", response.StatusCode)
+	}
+}
+
+func handleWebhook(w http.ResponseWriter, r *http.Request) {
+
+	bodyBytes, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "Failed to read request body", http.StatusInternalServerError)
+		return
+	}
+	// Close the body when you're done with it
+	defer r.Body.Close()
+
+	var data map[string]interface{}
+	err = json.Unmarshal(bodyBytes, &data)
+
 	// Extract user and handle the received answer
-	user := db.GetUser(data["user_id"].(int))
+	user := db.GetUser(int(data["user_id"].(float64)))
 	handleAnswerReceived(user, data)
 
 	// Respond to the webhook
@@ -162,124 +276,6 @@ func handleAnswerReceived(user *User, data map[string]interface{}) {
 	}
 }
 
-func sendMessageMockServer(data map[string]interface{}) {
-	serverURL := "http://localhost:5000/api/message"
-	jsonData, err := json.Marshal(data)
-	if err != nil {
-		log.Printf("Failed to marshal data: %v\n", err)
-		return
-	}
-
-	response, err := http.Post(serverURL, "application/json", bytes.NewBuffer(jsonData))
-	if err != nil {
-		log.Printf("Failed to send request: %v\n", err)
-		return
-	}
-	defer response.Body.Close()
-
-	if response.StatusCode == http.StatusOK {
-		var respData map[string]interface{}
-		if err := json.NewDecoder(response.Body).Decode(&respData); err != nil {
-			log.Println("Error decoding response:", err)
-			return
-		}
-		log.Printf("Server responded with: %v\n", respData)
-	} else {
-		log.Printf("Failed to send message. Server responded with status code: %d\n", response.StatusCode)
-	}
-}
-
-func getStats(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	err := json.NewEncoder(w).Encode(Stats)
-	if err != nil {
-		return
-	}
-}
-
-type User struct {
-	Name    string
-	Surname string
-	UserID  int
-	Age     string
-}
-
-type UserDatabase struct {
-	users map[int]*User
-}
-
-func NewUserDatabase() *UserDatabase {
-	return &UserDatabase{
-		users: make(map[int]*User),
-	}
-}
-
-func (db *UserDatabase) CreateUser(name string, surname string, userID int, age string) *User {
-	if _, exists := db.users[userID]; !exists {
-		newUser := &User{
-			Name:    name,
-			Surname: surname,
-			UserID:  userID,
-			Age:     age,
-		}
-		db.users[userID] = newUser
-		return newUser
-	}
-	return nil
-}
-
-func (db *UserDatabase) GetUser(userID int) *User {
-	return db.users[userID]
-}
-
-func (db *UserDatabase) GetAllUsers() []*User {
-	var allUsers []*User
-	for _, user := range db.users {
-		allUsers = append(allUsers, user)
-	}
-	return allUsers
-}
-
-func (db *UserDatabase) ListUsers() {
-	for _, user := range db.users {
-		fmt.Println(user.Name, user.Surname, user.UserID, user.Age)
-	}
-}
-
-type Data struct {
-	JSON               func(*User) map[string]interface{}
-	ButtonNameOfOrigin string
-}
-
-func NewData(jsonFunc func(*User) map[string]interface{}, buttonNameOfOrigin string) *Data {
-	return &Data{
-		JSON:               jsonFunc,
-		ButtonNameOfOrigin: buttonNameOfOrigin,
-	}
-}
-
-type TreeNode struct {
-	Data     *Data
-	Children []*TreeNode
-}
-
-func NewTreeNode(data *Data) *TreeNode {
-	return &TreeNode{
-		Data:     data,
-		Children: make([]*TreeNode, 0),
-	}
-}
-
-func (node *TreeNode) AddChild(childNode *TreeNode) {
-	node.Children = append(node.Children, childNode)
-}
-
-func createUsers(db *UserDatabase) {
-	db.CreateUser("spiros", "diochnos", 1, "26")
-	db.CreateUser("vaso", "kollia", 2, "27")
-	db.CreateUser("angelos", "todri", 3, "28")
-}
-
 func main() {
 	// Start the client's server in a separate goroutine
 	var wg sync.WaitGroup
@@ -289,7 +285,9 @@ func main() {
 		RunClientServer()
 	}()
 
-	createUsers(db)
+	db.CreateUser("spiros", "diochnos", 1, "26")
+	db.CreateUser("vaso", "kollia", 2, "27")
+	db.CreateUser("angelos", "todri", 3, "28")
 
 	// Creating data instances
 	dataRoot := NewData(CreateWelcomingMessage, "")
