@@ -188,6 +188,7 @@ func sendMessageMockServer(data map[string]interface{}) {
 		log.Printf("Failed to send message. Server responded with status code: %d\n", response.StatusCode)
 	}
 }
+
 func getStats(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	err := json.NewEncoder(w).Encode(Stats)
@@ -308,8 +309,7 @@ func main() {
 
 	for _, user := range db.GetAllUsers() {
 		UserNodeDict[user] = root
-		// send message to mock server logic here
-		// sendMessageMockServer(root.Data.JSON(user))
+		sendMessageMockServer(root.Data.JSON(user))
 	}
 
 	wg.Wait()
